@@ -510,6 +510,7 @@ docker volume rm xboard_mysql-data
 
 ```bash
 docker volume ls | grep mysql-data
+docker volume inspect xboard_mysql-data
 ```
 
 需要长期保存的数据：
