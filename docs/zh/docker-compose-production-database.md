@@ -9,6 +9,7 @@
 - 不需要 clone 整个项目，只需要写 `compose.yaml` 拉取镜像。
 - Xboard 宿主机端口使用 `10088`。
 - Cloudflare Origin Rule 把请求转发到源站 `10088`。
+- Ubuntu 使用 `ufw` 放行必要端口。
 - MySQL 数据必须持久化。
 - 必须定期备份数据库。
 
@@ -253,7 +254,128 @@ Destination Port / Rewrite to: 10088
 
 服务器防火墙或安全组需要允许 Cloudflare 访问 `10088`。如果可以限制来源 IP，建议只允许 Cloudflare IP 段访问 `10088`，不要对全网开放。
 
-## 四、生产环境日常操作
+## 四、Ubuntu 防火墙端口
+
+本方案部署在 Ubuntu 上，建议使用 `ufw` 管理宿主机防火墙。
+
+### 1. 需要开放的端口
+
+宿主机需要开放：
+
+| 端口 | 协议 | 用途 | 是否必须 |
+| --- | --- | --- | --- |
+| `22` | TCP | SSH 登录服务器 | 必须，除非你改了 SSH 端口 |
+| `10088` | TCP | Xboard 面板入口，Cloudflare 回源访问，也用于节点对接面板 | 必须 |
+
+不需要开放：
+
+| 端口 | 原因 |
+| --- | --- |
+| `3306` | MySQL 只给 Docker 内部的 Xboard 使用，不应该暴露公网 |
+| `6379` | Redis 使用容器内部 Unix socket，不应该暴露公网 |
+| `7001` | 容器内部端口已经映射到宿主机 `10088`，宿主机不需要开放 `7001` |
+| `8076` | 这是容器内部 WebSocket 服务端口，Caddy 已经通过 `/ws` 转发，不需要暴露 |
+
+节点对接面板时使用的也是 Xboard 入口：
+
+```text
+https://你的域名
+```
+
+Cloudflare 回源到：
+
+```text
+http://服务器公网IP:10088
+```
+
+节点 WebSocket 地址会由面板返回，默认是：
+
+```text
+wss://你的域名/ws
+```
+
+在 Docker 一体化部署里，`/ws` 会通过容器内 Caddy 转发到内部 `8076`，所以宿主机不需要开放 `8076`。
+
+### 2. ufw 开放端口
+
+先确保 SSH 不会被断开：
+
+```bash
+ufw allow 22/tcp
+```
+
+开放 Xboard 对外端口：
+
+```bash
+ufw allow 10088/tcp
+```
+
+启用 ufw：
+
+```bash
+ufw enable
+```
+
+查看状态：
+
+```bash
+ufw status verbose
+```
+
+### 3. 更安全的做法：只允许 Cloudflare 访问 10088
+
+如果你只通过 Cloudflare 访问 Xboard，建议不要对全网开放 `10088`，而是只允许 Cloudflare IP 段访问。
+
+做法是：
+
+1. 先允许 SSH：
+
+```bash
+ufw allow 22/tcp
+```
+
+2. 只允许 Cloudflare IP 访问 `10088`。
+
+Cloudflare IP 段会变化，建议以 Cloudflare 官方页面为准：
+
+```text
+https://www.cloudflare.com/ips/
+```
+
+示例命令格式：
+
+```bash
+ufw allow from CLOUDFLARE_IP段 to any port 10088 proto tcp
+```
+
+例如：
+
+```bash
+ufw allow from 173.245.48.0/20 to any port 10088 proto tcp
+```
+
+需要把 Cloudflare 官方列出的 IPv4 和 IPv6 段都加进去。
+
+3. 不要再执行这个全开放命令：
+
+```bash
+ufw allow 10088/tcp
+```
+
+如果之前已经全开放，可以删除规则：
+
+```bash
+ufw status numbered
+ufw delete 规则编号
+```
+
+### 4. 节点服务器自身端口
+
+这里说的是 Xboard 面板服务器需要开放的端口。
+
+如果你还有独立节点服务器，节点服务器还需要开放节点协议自己的入站端口，例如你在后台配置的 Shadowsocks、Trojan、VLESS 等端口。这些端口属于节点服务器，不属于 Xboard 面板服务器。
+
+## 五、生产环境日常操作
 
 本章节用于安装完成后的正式运行。不要再执行 `xboard:install`。
 
@@ -326,7 +448,7 @@ docker compose restart xboard
 docker compose restart mysql
 ```
 
-## 五、生产环境更新
+## 六、生产环境更新
 
 更新前先备份数据库。备份方法见“数据库备份”章节。
 
@@ -353,7 +475,7 @@ php artisan xboard:update
 docker compose logs -f xboard
 ```
 
-## 六、数据持久化
+## 七、数据持久化
 
 MySQL 数据保存在 Docker volume：
 
@@ -400,7 +522,7 @@ docker volume ls | grep mysql-data
 - MySQL 的 `mysql-data` volume
 - `backup/` 里的数据库备份
 
-## 七、数据库备份
+## 八、数据库备份
 
 ### 1. 手动备份
 
@@ -468,7 +590,7 @@ gunzip -c backup/xboard_你的备份文件.sql.gz | head
 
 更严格的方法是在另一台测试服务器上恢复一次，确认 Xboard 可以正常启动。
 
-## 八、数据库恢复和迁移机器
+## 九、数据库恢复和迁移机器
 
 迁移机器不需要重新安装 Xboard。不要再执行：
 
@@ -511,7 +633,7 @@ docker compose up -d
 docker compose logs -f xboard
 ```
 
-## 九、常见问题
+## 十、常见问题
 
 ### MySQL 连接失败
 
@@ -574,7 +696,7 @@ config('database.default')
 mysql
 ```
 
-## 十、最终建议
+## 十一、最终建议
 
 1. 首次安装时，先启动 MySQL，再执行 `xboard:install`，最后启动全部服务。
 2. 安装完成后，日常只使用 `docker compose up -d` 启动。
@@ -584,3 +706,4 @@ mysql
 6. 定期把备份复制到服务器外部。
 7. 迁移机器时恢复 `.env` 和数据库，不要重新安装。
 8. Cloudflare Origin Rule 负责把请求转发到源站 `10088`，不需要 Nginx。
+9. 面板服务器只需要开放 SSH 和 `10088`；不要开放 MySQL、Redis 或内部 WebSocket 端口。
