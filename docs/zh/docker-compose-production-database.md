@@ -531,9 +531,7 @@ docker volume inspect xboard_mysql-data
 cd /root/xboard
 mkdir -p backup
 
-docker compose exec mysql sh -c \
-  'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers xboard' \
-  | gzip > backup/xboard_$(date +%F_%H-%M-%S).sql.gz
+docker compose exec -T mysql env MYSQL_PWD='MYSQL_ROOT_PASSWORD' mysqldump -uroot --single-transaction --routines --triggers xboard | gzip > "backup/xboard_$(date +%F_%H-%M-%S).sql.gz"
 ```
 
 查看备份文件：
